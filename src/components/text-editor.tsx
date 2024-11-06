@@ -1,9 +1,8 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { Check, ChevronDown, Copy, Edit, Wand2 } from 'lucide-react'
+import { Copy, Wand2 } from 'lucide-react'
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { watsonApi, WatsonResponse, ErrorItem } from '@/lib/watson-api'
 
 interface ErrorInfo {
@@ -16,16 +15,56 @@ interface ErrorInfo {
   };
 }
 
-export function TextEditor() {
+interface TextEditorProps {
+  onErrorsFound: (errors: WatsonResponse) => void;
+  onSynonymsGenerated: (synonyms: string) => void;
+}
+
+export function TextEditor({ onErrorsFound, onSynonymsGenerated }: TextEditorProps) {
   const [userInput, setUserInput] = useState("")
   const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currentErrors, setCurrentErrors] = useState<ErrorItem[]>([])
+  const [selectedText, setSelectedText] = useState("")
+  const [isSynonymLoading, setIsSynonymLoading] = useState(false)
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  const getErrorWord = (error: ErrorItem) => error["خطأ"] || error["الكلمة الخاطئة"] || error["الكلمة_الخاطئة"] || "";
   const getErrorType = (error: ErrorItem) => error["نوع_الخطأ"] || error["نوع الخطأ"] || "";
   const getErrorCorrection = (error: ErrorItem) => error["تصحيح_الكلمة"] || error["تصحيح الكلمة"] || "";
+
+  const handleTextSelection = () => {
+    const selection = window.getSelection();
+    if (selection) {
+      const text = selection.toString().trim();
+      setSelectedText(text);
+      console.log('Selected text:', text);
+    }
+  };
+
+  const handleGenerateSynonyms = async () => {
+    if (!selectedText) {
+      console.log('No text selected');
+      return;
+    }
+    
+    console.log('Generating synonyms for:', selectedText);
+    
+    try {
+      setIsSynonymLoading(true);
+      const response = await watsonApi.generateSynonyms(selectedText);
+      const synonyms = response.results[0].generated_text;
+      console.log('Generated synonyms:', synonyms);
+      onSynonymsGenerated(synonyms);
+      
+    } catch (err) {
+      console.error('Error generating synonyms:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred generating synonyms');
+    } finally {
+      setIsSynonymLoading(false);
+    }
+  };
 
   const markErrorsInText = (text: string, errors: ErrorItem[]) => {
     console.log('Marking errors in text:', { text, errors });
@@ -36,15 +75,19 @@ export function TextEditor() {
     let processedText = tempDiv.innerHTML;
 
     // Sort errors by length (longest first) to prevent partial word matches
-    const sortedErrors = [...errors].sort((a, b) => b["خطأ"].length - a["خطأ"].length);
+    const sortedErrors = [...errors].sort((a, b) => {
+      const wordA = getErrorWord(a);
+      const wordB = getErrorWord(b);
+      return wordB.length - wordA.length;
+    });
 
     sortedErrors.forEach(errorItem => {
-      const errorWord = errorItem["خطأ"];
+      const errorWord = getErrorWord(errorItem);
       const errorType = getErrorType(errorItem);
       const correction = getErrorCorrection(errorItem);
 
       // Use word boundaries and capture spaces/punctuation
-      const regex = new RegExp(`(^|\\s|[.،؛])(${errorWord})($|\\s|[.،؛])`, 'g');
+      const regex = new RegExp(`(^|\\s|[.،؛:-])(${errorWord})($|\\s|[.،؛:-])`, 'g');
       processedText = processedText.replace(regex, (match, before, word, after) => {
         return `${before}<span 
           class="error-word" 
@@ -160,6 +203,8 @@ export function TextEditor() {
       console.log('API Response:', errors);
       
       setCurrentErrors(errors);
+      onErrorsFound(errors); // Pass errors to parent component
+      
       const displayText = markErrorsInText(userInput, errors);
       
       const editorDiv = document.querySelector('[contenteditable]');
@@ -195,7 +240,9 @@ export function TextEditor() {
             console.log('New user input:', newText);
             setUserInput(newText);
             setCurrentErrors([]);
+            onErrorsFound([]); // Clear errors in parent when input changes
           }}
+          onMouseUp={handleTextSelection}
         />
         {errorInfo && (
           <div
@@ -226,8 +273,8 @@ export function TextEditor() {
                   marginLeft: '-6px',
                 }}
               />
-              <div className="font-bold mb-1">الخطأ: {errorInfo.word}</div>
-              <div className="text-red-600">نوع الخطأ: {errorInfo.type}</div>
+              <div className="font-bold mb-1">{errorInfo.word}</div>
+              <div className="text-red-600">{errorInfo.type}</div>
               <div className="text-green-600 mt-1">التصحيح: {errorInfo.correction}</div>
             </div>
           </div>
@@ -250,16 +297,16 @@ export function TextEditor() {
             disabled={isLoading}
           >
             <Wand2 className="ml-2 h-4 w-4" />
-            {isLoading ? 'جاري الكشف...' : 'كشف الأخطاء'}
+            {isLoading ? 'جاري التدقيق...' : 'تدقيق'}
           </Button>
-          <Select defaultValue="translate">
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="اختر الإجراء" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="translate">اللغة العربية</SelectItem>
-            </SelectContent>
-          </Select>
+          <Button
+            variant="outline"
+            className="w-[140px]"
+            onClick={handleGenerateSynonyms}
+            disabled={isSynonymLoading || !selectedText}
+          >
+            {isSynonymLoading ? 'جاري التوليد...' : 'توليد مرادفات'}
+          </Button>
         </div>
       </div>
       {error && (
