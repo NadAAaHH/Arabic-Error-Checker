@@ -1,9 +1,0 @@
-langchain
-langchain-community
-sentence-transformers
-faiss-gpu
-ibm-watsonx-ai
-langchain_ibm
-pydantic==1.10.2
-ibm-watson-machine-learning
-rouge-score
